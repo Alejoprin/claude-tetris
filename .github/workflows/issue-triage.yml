@@ -1,0 +1,90 @@
+name: Triaje de Issues con Claude
+
+on:
+  issues:
+    types: [opened, edited]
+
+concurrency:
+  group: issue-triage-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  triage:
+    # No correr en PRs (emiten eventos `issues`), ni cuando el cuerpo menciona
+    # @claude (de eso se encarga claude.yml). En `edited`, correr solo si cambió
+    # el cuerpo o el título, no cuando solo cambian labels/asignados.
+    if: |
+      github.event.issue.pull_request == null &&
+      !contains(github.event.issue.body, '@claude') &&
+      (github.event.action == 'opened' ||
+       github.event.changes.body != null ||
+       github.event.changes.title != null)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh issue edit:*),Bash(gh issue comment:*),Bash(gh label list:*),Read,Grep,Glob"'
+          prompt: |
+            Eres el triador automático de issues de este repositorio (un Tetris en
+            HTML/JS plano). El issue a analizar es el número ${{ github.event.issue.number }}.
+            Responde y escribe SIEMPRE en español.
+
+            Pasos:
+
+            1. Lee el issue:
+               `gh issue view ${{ github.event.issue.number }} --json title,body,labels,comments`
+
+            2. Lee `CLAUDE.md` y los archivos relevantes del juego (`game.js`,
+               `index.html`, `style.css`, `README.md`) para diagnosticar con
+               contexto real del código, no de forma genérica.
+
+            3. LABELS. Elige SOLO de esta lista fija del repo, sin inventar ninguna:
+               `bug`, `enhancement`, `documentation`, `question`, `accessibility`,
+               `good first issue`, `help wanted`, `duplicate`, `invalid`, `wontfix`.
+               Aplica las que correspondan con:
+               `gh issue edit ${{ github.event.issue.number }} --add-label "label1" --add-label "label2"`
+               Conserva las labels que el issue ya tenga; no quites ninguna.
+
+            4. DIAGNÓSTICO. Escribe el diagnóstico a un archivo (por ejemplo
+               `/tmp/diagnostico.md`) y publícalo como UN único comentario con:
+               `gh issue comment ${{ github.event.issue.number }} --body-file /tmp/diagnostico.md`
+               (usa --body-file, no --body).
+
+               El comentario debe empezar con el encabezado exacto:
+               `## 🤖 Diagnóstico automático`
+               y contener estas secciones:
+
+               - **Resumen** — 1-2 frases de qué pide el issue.
+               - **Tipo** — bug / mejora / duda / documentación, y por qué.
+               - **Archivos probablemente afectados** — rutas y líneas concretas
+                 (`game.js:120`, etc.), con una línea de por qué cada uno.
+               - **Causa probable** — solo si es bug; hipótesis basada en el código
+                 que leíste, no genérica.
+               - **Enfoque sugerido** — pasos de alto nivel para implementar la
+                 solución, teniendo en cuenta los gotchas de `CLAUDE.md`: tamaño del
+                 canvas hardcodeado en `index.html` vs `COLS*BLOCK`/`ROWS*BLOCK`,
+                 `updateHUD()` no se llama desde `loop()`, y los arrays
+                 `COLORS`/`PIECES` alineados por índice con el tipo de pieza.
+               - **Criterios de aceptación** — checklist verificable manualmente
+                 (el proyecto no tiene tests).
+               - **Información faltante** — qué habría que preguntarle al autor, si
+                 aplica.
+
+            5. Si el issue ya tiene un comentario previo que empieza con
+               `## 🤖 Diagnóstico automático` (caso de edición), publica uno NUEVO
+               e indica al inicio que es una revisión tras la edición del issue. No
+               edites ni borres el comentario anterior: se mantiene el historial.
+
+            6. No modifiques código, no crees ramas ni PRs, no cierres el issue.
+              Tu trabajo es solo etiquetar y diagnosticar.
