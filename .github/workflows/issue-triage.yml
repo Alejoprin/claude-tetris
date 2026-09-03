@@ -61,6 +61,12 @@ jobs:
                `gh issue comment ${{ github.event.issue.number }} --body-file /tmp/diagnostico.md`
                (usa --body-file, no --body).
 
+               El comentario debe estar escrito en Markdown válido de GitHub
+               (GitHub Flavored Markdown): encabezados con `#`, listas, tablas,
+               bloques de código con triple backtick y lenguaje, enlaces y
+               referencias a archivos/líneas como código en línea. Nada de HTML
+               crudo ni sintaxis que GitHub no renderice.
+
                El comentario debe empezar con el encabezado exacto:
                `## 🤖 Diagnóstico automático`
                y contener estas secciones:
