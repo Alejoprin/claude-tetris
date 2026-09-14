@@ -13,7 +13,10 @@ const COLORS = [
   '#e57373', // Z - red
   '#90caf9', // J - pale blue
   '#ffb74d', // L - orange
+  '#b0bec5', // tuerca - gris metálico
 ];
+
+const NUT = 8;
 
 const PIECES = [
   null,
@@ -24,9 +27,11 @@ const PIECES = [
   [[5,5,0],[0,5,5],[0,0,0]],                  // Z
   [[6,0,0],[6,6,6],[0,0,0]],                  // J
   [[0,0,7],[7,7,7],[0,0,0]],                  // L
+  [[8,8,8],[8,0,8],[8,8,8]],                  // tuerca
 ];
 
 const LINE_SCORES = [0, 100, 300, 500, 800];
+const NUT_CELL_SCORE = 50;
 
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
@@ -67,7 +72,7 @@ function createBoard() {
 }
 
 function randomPiece() {
-  const type = Math.floor(Math.random() * 7) + 1;
+  const type = Math.floor(Math.random() * 8) + 1;
   const shape = PIECES[type].map(row => [...row]);
   return { type, shape, x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2), y: 0 };
 }
@@ -115,8 +120,10 @@ function merge() {
 
 function clearLines() {
   let cleared = 0;
+  let nutCells = 0;
   for (let r = ROWS - 1; r >= 0; r--) {
     if (board[r].every(v => v !== 0)) {
+      nutCells += board[r].filter(v => v === NUT).length;
       board.splice(r, 1);
       board.unshift(new Array(COLS).fill(0));
       cleared++;
@@ -126,6 +133,7 @@ function clearLines() {
   if (cleared) {
     lines += cleared;
     score += (LINE_SCORES[cleared] || 0) * level;
+    score += nutCells * NUT_CELL_SCORE * level;
     level = Math.floor(lines / 10) + 1;
     dropInterval = Math.max(100, 1000 - (level - 1) * 90);
     updateHUD();
@@ -189,6 +197,25 @@ function drawBlock(context, x, y, colorIndex, size, alpha) {
   context.globalAlpha = 1;
 }
 
+// Perfora un círculo transparente en (cx, cy) — deja ver el fondo CSS, sirve en ambos temas.
+function punchNutHole(context, cx, cy, size) {
+  context.globalCompositeOperation = 'destination-out';
+  context.beginPath();
+  context.arc((cx + 0.5) * size, (cy + 0.5) * size, size * 0.72, 0, Math.PI * 2);
+  context.fill();
+  context.globalCompositeOperation = 'source-over';
+}
+
+function strokeNutHole(context, cx, cy, size, alpha) {
+  context.globalAlpha = alpha;
+  context.strokeStyle = COLORS[NUT];
+  context.lineWidth = 2;
+  context.beginPath();
+  context.arc((cx + 0.5) * size, (cy + 0.5) * size, size * 0.6, 0, Math.PI * 2);
+  context.stroke();
+  context.globalAlpha = 1;
+}
+
 function drawGrid() {
   ctx.strokeStyle = gridLineColor;
   ctx.lineWidth = 0.5;
@@ -215,6 +242,20 @@ function draw() {
     for (let c = 0; c < COLS; c++)
       drawBlock(ctx, c, r, board[r][c], BLOCK);
 
+  // agujeros de tuercas ya fijadas: celda vacía rodeada por los 8 vecinos de la tuerca
+  for (let r = 1; r < ROWS - 1; r++) {
+    for (let c = 1; c < COLS - 1; c++) {
+      if (board[r][c] !== 0) continue;
+      let ringComplete = true;
+      for (let dr = -1; dr <= 1 && ringComplete; dr++)
+        for (let dc = -1; dc <= 1; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          if (board[r + dr][c + dc] !== NUT) { ringComplete = false; break; }
+        }
+      if (ringComplete) punchNutHole(ctx, c, r, BLOCK);
+    }
+  }
+
   if (gameOver) return;
 
   // ghost
@@ -223,11 +264,13 @@ function draw() {
     for (let c = 0; c < current.shape[r].length; c++)
       if (current.shape[r][c])
         drawBlock(ctx, current.x + c, gy + r, current.shape[r][c], BLOCK, 0.2);
+  if (current.type === NUT) strokeNutHole(ctx, current.x + 1, gy + 1, BLOCK, 0.2);
 
   // current piece
   for (let r = 0; r < current.shape.length; r++)
     for (let c = 0; c < current.shape[r].length; c++)
       drawBlock(ctx, current.x + c, current.y + r, current.shape[r][c], BLOCK);
+  if (current.type === NUT) punchNutHole(ctx, current.x + 1, current.y + 1, BLOCK);
 }
 
 function drawNext() {
@@ -239,6 +282,7 @@ function drawNext() {
   for (let r = 0; r < shape.length; r++)
     for (let c = 0; c < shape[r].length; c++)
       drawBlock(nextCtx, offX + c, offY + r, shape[r][c], NB);
+  if (next.type === NUT) punchNutHole(nextCtx, offX + 1, offY + 1, NB);
 }
 
 function endGame() {

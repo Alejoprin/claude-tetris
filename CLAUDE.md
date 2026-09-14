@@ -20,9 +20,10 @@ one scope. Adding a file means adding a `<script>` tag to `index.html` and keepi
 
 `game.js` holds all logic:
 
-- **Board**: `ROWS × COLS` array of ints; `0` = empty, `1–7` = piece type, which is also the index into
+- **Board**: `ROWS × COLS` array of ints; `0` = empty, `1–8` = piece type, which is also the index into
   `COLORS` and `PIECES`. Piece type, color, and shape are the same number everywhere — keep those three
-  arrays index-aligned.
+  arrays index-aligned. Type `8` (`NUT`) is the 3×3 "tuerca" — a solid ring with a permanently
+  unfillable hole in its center once locked.
 - **Pieces**: square matrices; rotation is a fresh transpose+reverse (`rotateCW`), never mutated in place.
   `tryRotate` applies basic wall kicks (`[0,-1,1,-2,2]` column offsets) before giving up on the rotation.
 - **Loop**: `requestAnimationFrame` accumulator (`dropAccum` vs `dropInterval`). `draw()` repaints the
@@ -41,3 +42,7 @@ one scope. Adding a file means adding a `<script>` tag to `index.html` and keepi
   made elsewhere need an explicit `updateHUD()`.
 - UI strings are Spanish (`PAUSA`, `Reiniciar`, `Puntuación`); panel labels are English. Match what's
   already on screen.
+- The tuerca (type `8`/`NUT`) is not drawn by `drawBlock` alone — `draw()` and `drawNext()` each make an
+  extra `punchNutHole` pass to cut its center hole (and the ghost gets a `strokeNutHole` outline instead,
+  so it doesn't erase real board cells underneath it). Any new piece-rendering codepath must account for
+  this second pass or the tuerca will render as a solid square.
