@@ -14,9 +14,11 @@ const COLORS = [
   '#90caf9', // J - pale blue
   '#ffb74d', // L - orange
   '#b0bec5', // tuerca - gris metálico
+  '#ff7043', // bomba - naranja
 ];
 
 const NUT = 8;
+const BOMB = 9;
 
 const PIECES = [
   null,
@@ -28,10 +30,16 @@ const PIECES = [
   [[6,0,0],[6,6,6],[0,0,0]],                  // J
   [[0,0,7],[7,7,7],[0,0,0]],                  // L
   [[8,8,8],[8,0,8],[8,8,8]],                  // tuerca
+  [[9]],                                       // bomba
 ];
 
 const LINE_SCORES = [0, 100, 300, 500, 800];
 const NUT_CELL_SCORE = 50;
+const BOMB_CELL_SCORE = 30;
+const BOMB_EVERY_LINES = 10;
+const BOMB_EVERY_PIECES = 10;
+const FUSE_MS = 350;
+const BLAST_MS = 300;
 
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
@@ -48,7 +56,7 @@ const themeToggleBtn = document.getElementById('theme-toggle');
 
 const THEME_KEY = 'tetris-theme';
 
-let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId;
+let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, bombPending, piecesPlaced, fuse, blast;
 let gridLineColor = '#22222e';
 
 function updateGridColor() {
@@ -71,10 +79,14 @@ function createBoard() {
   return Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
 }
 
-function randomPiece() {
-  const type = Math.floor(Math.random() * 8) + 1;
+function makePiece(type) {
   const shape = PIECES[type].map(row => [...row]);
   return { type, shape, x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2), y: 0 };
+}
+
+function randomPiece() {
+  const type = Math.floor(Math.random() * 8) + 1;
+  return makePiece(type);
 }
 
 function collide(shape, ox, oy) {
@@ -131,11 +143,13 @@ function clearLines() {
     }
   }
   if (cleared) {
+    const linesBefore = lines;
     lines += cleared;
     score += (LINE_SCORES[cleared] || 0) * level;
     score += nutCells * NUT_CELL_SCORE * level;
     level = Math.floor(lines / 10) + 1;
     dropInterval = Math.max(100, 1000 - (level - 1) * 90);
+    if (Math.floor(lines / BOMB_EVERY_LINES) > Math.floor(linesBefore / BOMB_EVERY_LINES)) bombPending = true;
     updateHUD();
   }
 }
@@ -164,14 +178,52 @@ function softDrop() {
 }
 
 function lockPiece() {
-  merge();
+  if (current.type === BOMB) {
+    if (fuse) detonate(fuse.cx, fuse.cy);
+    fuse = { cx: current.x, cy: current.y, t: 0 };
+  } else {
+    merge();
+    piecesPlaced++;
+    if (piecesPlaced % BOMB_EVERY_PIECES === 0) bombPending = true;
+  }
   clearLines();
   spawn();
 }
 
+function detonate(cx, cy) {
+  const cells = [];
+  for (let dr = -1; dr <= 1; dr++) {
+    for (let dc = -1; dc <= 1; dc++) {
+      const r = cy + dr, c = cx + dc;
+      if (r < 0 || r >= ROWS || c < 0 || c >= COLS) continue;
+      if (board[r][c] !== 0) {
+        cells.push({ r, c, type: board[r][c] });
+        board[r][c] = 0;
+      }
+    }
+  }
+  score += cells.length * BOMB_CELL_SCORE * level;
+  collapseColumns();
+  clearLines();
+  updateHUD();
+  blast = { cx, cy, t: 0, cells };
+  fuse = null;
+}
+
+function collapseColumns() {
+  for (let c = 0; c < COLS; c++) {
+    const stack = [];
+    for (let r = 0; r < ROWS; r++)
+      if (board[r][c] !== 0) stack.push(board[r][c]);
+    for (let r = ROWS - 1; r >= 0; r--)
+      board[r][c] = stack.length ? stack.pop() : 0;
+  }
+}
+
 function spawn() {
   current = next;
-  next = randomPiece();
+  next = bombPending ? makePiece(BOMB) : randomPiece();
+  bombPending = false;
   if (collide(current.shape, current.x, current.y)) {
     endGame();
     return;
@@ -216,6 +268,64 @@ function strokeNutHole(context, cx, cy, size, alpha) {
   context.globalAlpha = 1;
 }
 
+// Dibuja el cuerpo redondo + mecha de la bomba, sobre el bloque ya pintado por drawBlock.
+function drawBombFace(context, cx, cy, size, alpha) {
+  context.globalAlpha = alpha ?? 1;
+  const px = (cx + 0.5) * size, py = (cy + 0.5) * size;
+  context.fillStyle = '#2b2b2b';
+  context.beginPath();
+  context.arc(px, py, size * 0.32, 0, Math.PI * 2);
+  context.fill();
+  context.strokeStyle = '#2b2b2b';
+  context.lineWidth = 2;
+  context.beginPath();
+  context.moveTo(px + size * 0.18, py - size * 0.28);
+  context.lineTo(px + size * 0.32, py - size * 0.42);
+  context.stroke();
+  context.globalAlpha = 1;
+}
+
+// Bomba fijada, parpadeando mientras cuenta hasta detonar.
+function drawFuse() {
+  if (!fuse) return;
+  const p = fuse.t / FUSE_MS;
+  const alpha = 0.55 + 0.45 * Math.abs(Math.sin(fuse.t / (55 - p * 30)));
+  drawBlock(ctx, fuse.cx, fuse.cy, BOMB, BLOCK, alpha);
+  drawBombFace(ctx, fuse.cx, fuse.cy, BLOCK, alpha);
+  const px = (fuse.cx + 0.5) * BLOCK, py = (fuse.cy + 0.5) * BLOCK;
+  const sparkR = BLOCK * (0.08 + 0.06 * Math.abs(Math.sin(fuse.t / 40)));
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = '#fff59d';
+  ctx.beginPath();
+  ctx.arc(px + BLOCK * 0.32, py - BLOCK * 0.42, sparkR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
+// Onda expansiva + celdas destruidas encogiéndose y desvaneciéndose.
+function drawBlast() {
+  if (!blast) return;
+  const p = blast.t / BLAST_MS;
+
+  for (const cell of blast.cells) {
+    const size = BLOCK * (1 - p * 0.6);
+    const offset = (BLOCK - size) / 2;
+    ctx.globalAlpha = 1 - p;
+    ctx.fillStyle = COLORS[cell.type];
+    ctx.fillRect(cell.c * BLOCK + offset, cell.r * BLOCK + offset, size, size);
+    ctx.globalAlpha = 1;
+  }
+
+  const px = (blast.cx + 0.5) * BLOCK, py = (blast.cy + 0.5) * BLOCK;
+  ctx.globalAlpha = 1 - p;
+  ctx.strokeStyle = COLORS[BOMB];
+  ctx.lineWidth = 3 * (1 - p);
+  ctx.beginPath();
+  ctx.arc(px, py, BLOCK * (0.4 + p * 2.2), 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
 function drawGrid() {
   ctx.strokeStyle = gridLineColor;
   ctx.lineWidth = 0.5;
@@ -256,6 +366,9 @@ function draw() {
     }
   }
 
+  drawFuse();
+  drawBlast();
+
   if (gameOver) return;
 
   // ghost
@@ -265,12 +378,14 @@ function draw() {
       if (current.shape[r][c])
         drawBlock(ctx, current.x + c, gy + r, current.shape[r][c], BLOCK, 0.2);
   if (current.type === NUT) strokeNutHole(ctx, current.x + 1, gy + 1, BLOCK, 0.2);
+  if (current.type === BOMB) drawBombFace(ctx, current.x, gy, BLOCK, 0.2);
 
   // current piece
   for (let r = 0; r < current.shape.length; r++)
     for (let c = 0; c < current.shape[r].length; c++)
       drawBlock(ctx, current.x + c, current.y + r, current.shape[r][c], BLOCK);
   if (current.type === NUT) punchNutHole(ctx, current.x + 1, current.y + 1, BLOCK);
+  if (current.type === BOMB) drawBombFace(ctx, current.x, current.y, BLOCK);
 }
 
 function drawNext() {
@@ -283,9 +398,11 @@ function drawNext() {
     for (let c = 0; c < shape[r].length; c++)
       drawBlock(nextCtx, offX + c, offY + r, shape[r][c], NB);
   if (next.type === NUT) punchNutHole(nextCtx, offX + 1, offY + 1, NB);
+  if (next.type === BOMB) drawBombFace(nextCtx, offX, offY, NB);
 }
 
 function endGame() {
+  if (fuse) detonate(fuse.cx, fuse.cy);
   gameOver = true;
   cancelAnimationFrame(animId);
   overlayTitle.textContent = 'GAME OVER';
@@ -319,6 +436,8 @@ function loop(ts) {
       lockPiece();
     }
   }
+  if (fuse) { fuse.t += dt; if (fuse.t >= FUSE_MS) detonate(fuse.cx, fuse.cy); }
+  if (blast) { blast.t += dt; if (blast.t >= BLAST_MS) blast = null; }
   draw();
   if (gameOver) return;
   animId = requestAnimationFrame(loop);
@@ -333,6 +452,10 @@ function init() {
   gameOver = false;
   dropInterval = 1000;
   dropAccum = 0;
+  bombPending = false;
+  piecesPlaced = 0;
+  fuse = null;
+  blast = null;
   lastTime = performance.now();
   next = randomPiece();
   spawn();
