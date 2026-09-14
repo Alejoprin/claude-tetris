@@ -45,6 +45,8 @@ const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
 const nextCanvas = document.getElementById('next-canvas');
 const nextCtx = nextCanvas.getContext('2d');
+const holdCanvas = document.getElementById('hold-canvas');
+const holdCtx = holdCanvas.getContext('2d');
 const scoreEl = document.getElementById('score');
 const linesEl = document.getElementById('lines');
 const levelEl = document.getElementById('level');
@@ -56,7 +58,7 @@ const themeToggleBtn = document.getElementById('theme-toggle');
 
 const THEME_KEY = 'tetris-theme';
 
-let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, bombPending, piecesPlaced, fuse, blast;
+let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, bombPending, piecesPlaced, fuse, blast, holdType, canHold;
 let gridLineColor = '#22222e';
 
 function updateGridColor() {
@@ -224,11 +226,33 @@ function spawn() {
   current = next;
   next = bombPending ? makePiece(BOMB) : randomPiece();
   bombPending = false;
+  canHold = true;
+  drawHold();
   if (collide(current.shape, current.x, current.y)) {
     endGame();
     return;
   }
   drawNext();
+}
+
+function hold() {
+  if (!canHold || current.type === BOMB) return;
+  const swapType = holdType;
+  holdType = current.type;
+  canHold = false;
+  if (swapType == null) {
+    current = next;
+    next = bombPending ? makePiece(BOMB) : randomPiece();
+    bombPending = false;
+    drawNext();
+  } else {
+    current = makePiece(swapType);
+  }
+  if (collide(current.shape, current.x, current.y)) {
+    endGame();
+    return;
+  }
+  drawHold();
 }
 
 function updateHUD() {
@@ -401,6 +425,21 @@ function drawNext() {
   if (next.type === BOMB) drawBombFace(nextCtx, offX, offY, NB);
 }
 
+function drawHold() {
+  const NB = 30;
+  holdCtx.clearRect(0, 0, holdCanvas.width, holdCanvas.height);
+  holdCanvas.classList.toggle('locked', !canHold);
+  if (holdType == null) return;
+  const shape = PIECES[holdType];
+  const offX = Math.floor((4 - shape[0].length) / 2);
+  const offY = Math.floor((4 - shape.length) / 2);
+  const alpha = canHold ? 1 : 0.35;
+  for (let r = 0; r < shape.length; r++)
+    for (let c = 0; c < shape[r].length; c++)
+      drawBlock(holdCtx, offX + c, offY + r, shape[r][c], NB, alpha);
+  if (holdType === NUT) punchNutHole(holdCtx, offX + 1, offY + 1, NB);
+}
+
 function endGame() {
   if (fuse) detonate(fuse.cx, fuse.cy);
   gameOver = true;
@@ -414,6 +453,7 @@ function togglePause() {
   if (gameOver) return;
   paused = !paused;
   if (!paused) {
+    overlay.classList.add('hidden');
     lastTime = performance.now();
     loop(lastTime);
   } else {
@@ -456,6 +496,8 @@ function init() {
   piecesPlaced = 0;
   fuse = null;
   blast = null;
+  holdType = null;
+  canHold = true;
   lastTime = performance.now();
   next = randomPiece();
   spawn();
@@ -485,6 +527,11 @@ document.addEventListener('keydown', e => {
     case 'Space':
       e.preventDefault();
       hardDrop();
+      break;
+    case 'KeyC':
+    case 'ShiftLeft':
+    case 'ShiftRight':
+      hold();
       break;
   }
   updateHUD();
