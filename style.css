@@ -227,3 +227,45 @@ kbd {
 #restart-btn:hover {
   background: var(--accent-hover);
 }
+
+/* ---- Selector de skin ---- */
+.skin-select {
+  background: var(--panel-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.skin-select:hover,
+.skin-select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* ---- Skins visuales ---- */
+/* Retro (default) no tiene reglas propias — es el resultado visual actual, sin cambios. */
+
+/* El color de la línea de grilla (--grid-line) por skin se resuelve en JS (SKIN_GRID_COLORS en
+   game.js), no aquí: [data-theme] y [data-skin] viven ambos en <html> con la misma especificidad,
+   así que una regla CSS por atributo siempre pisaría a la otra según orden de declaración. */
+
+[data-skin="neon"] #board,
+[data-skin="neon"] #next-canvas,
+[data-skin="neon"] #hold-canvas {
+  background: #05050a;
+  border-color: #00e5ff55;
+  box-shadow: 0 0 24px rgba(0, 229, 255, 0.25);
+}
+
+[data-skin="pastel"] #board,
+[data-skin="pastel"] #next-canvas,
+[data-skin="pastel"] #hold-canvas {
+  background: #fdf6ff;
+  border-color: #e3c9f0;
+  border-radius: 12px;
+}
