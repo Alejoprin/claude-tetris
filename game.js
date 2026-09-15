@@ -17,6 +17,42 @@ const COLORS = [
   '#ff7043', // bomba - naranja
 ];
 
+// Paletas alternativas por skin — mismo largo/orden que COLORS, nunca se muta COLORS.
+const PALETTE_NEON = [
+  null,
+  '#00e5ff',
+  '#fff176',
+  '#e040fb',
+  '#69f0ae',
+  '#ff1744',
+  '#448aff',
+  '#ff9100',
+  '#90a4ae',
+  '#ff3d00',
+];
+
+const PALETTE_PASTEL = [
+  null,
+  '#a8d8ea',
+  '#fff2b2',
+  '#d9b8e8',
+  '#b5e8b0',
+  '#f4b8b8',
+  '#b8cdf0',
+  '#f7cfa0',
+  '#d6d9de',
+  '#f7b7a3',
+];
+
+const PALETTES = {
+  retro: COLORS,
+  neon: PALETTE_NEON,
+  pastel: PALETTE_PASTEL,
+  pixel: COLORS,
+};
+
+const SKINS = ['retro', 'neon', 'pastel', 'pixel'];
+
 const NUT = 8;
 const BOMB = 9;
 
@@ -55,13 +91,28 @@ const overlayTitle = document.getElementById('overlay-title');
 const overlayScore = document.getElementById('overlay-score');
 const restartBtn = document.getElementById('restart-btn');
 const themeToggleBtn = document.getElementById('theme-toggle');
+const skinSelect = document.getElementById('skin-select');
 
 const THEME_KEY = 'tetris-theme';
+const SKIN_KEY = 'tetris-skin';
 
-let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, bombPending, piecesPlaced, fuse, blast, holdType, canHold;
+let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, bombPending, piecesPlaced, fuse, blast, holdType, canHold, skin;
 let gridLineColor = '#22222e';
 
+// Los skins neon/pastel/pixel fijan su propio fondo de canvas sin importar el tema claro/oscuro,
+// así que su línea de grilla también se fija en JS — evita una guerra de especificidad CSS entre
+// [data-theme] y [data-skin] (ambos en <html>) donde el que se declara último siempre ganaba.
+const SKIN_GRID_COLORS = {
+  neon: '#0d3b40',
+  pastel: '#e8dff5',
+  pixel: '#3a3a3a',
+};
+
 function updateGridColor() {
+  if (skin && SKIN_GRID_COLORS[skin]) {
+    gridLineColor = SKIN_GRID_COLORS[skin];
+    return;
+  }
   gridLineColor = getComputedStyle(document.documentElement).getPropertyValue('--grid-line').trim() || gridLineColor;
 }
 
@@ -75,6 +126,18 @@ function applyTheme(theme) {
 function toggleTheme() {
   const currentTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
   applyTheme(currentTheme);
+}
+
+function currentPalette() {
+  return PALETTES[skin] || COLORS;
+}
+
+function applySkin(newSkin) {
+  skin = SKINS.includes(newSkin) ? newSkin : 'retro';
+  document.documentElement.setAttribute('data-skin', skin);
+  updateGridColor();
+  if (skinSelect) skinSelect.value = skin;
+  localStorage.setItem(SKIN_KEY, skin);
 }
 
 function createBoard() {
@@ -263,14 +326,99 @@ function updateHUD() {
 
 function drawBlock(context, x, y, colorIndex, size, alpha) {
   if (!colorIndex) return;
-  const color = COLORS[colorIndex];
-  context.globalAlpha = alpha ?? 1;
+  const color = currentPalette()[colorIndex];
+  const a = alpha ?? 1;
+  switch (skin) {
+    case 'neon':
+      drawBlockNeon(context, x, y, color, size, a);
+      break;
+    case 'pastel':
+      drawBlockPastel(context, x, y, color, size, a);
+      break;
+    case 'pixel':
+      drawBlockPixel(context, x, y, color, size, a);
+      break;
+    default:
+      drawBlockRetro(context, x, y, color, size, a);
+  }
+}
+
+function drawBlockRetro(context, x, y, color, size, alpha) {
+  context.globalAlpha = alpha;
   context.fillStyle = color;
   context.fillRect(x * size + 1, y * size + 1, size - 2, size - 2);
   // highlight
   context.fillStyle = 'rgba(255,255,255,0.12)';
   context.fillRect(x * size + 1, y * size + 1, size - 2, 4);
   context.globalAlpha = 1;
+}
+
+// Neon — fondo oscuro, borde brillante y glow con shadowBlur.
+// shadowBlur es caro por celda a 60fps con ~200 celdas en pantalla, así que se activa una sola vez
+// (solo para el trazo del borde) en vez de en cada fillRect del bloque.
+function drawBlockNeon(context, x, y, color, size, alpha) {
+  const px = x * size + 1, py = y * size + 1, s = size - 2;
+  context.save();
+  context.globalAlpha = alpha;
+  context.fillStyle = '#0a0a0f';
+  context.fillRect(px, py, s, s);
+  context.shadowColor = color;
+  context.shadowBlur = size * 0.5;
+  context.strokeStyle = color;
+  context.lineWidth = 2;
+  context.strokeRect(px + 1, py + 1, Math.max(0, s - 2), Math.max(0, s - 2));
+  context.shadowBlur = 0;
+  context.globalAlpha = alpha * 0.85;
+  context.fillStyle = color;
+  context.fillRect(px + 3, py + 3, Math.max(0, s - 6), Math.max(0, s - 6));
+  context.restore();
+}
+
+// Pastel — colores suaves con esquinas redondeadas.
+function drawBlockPastel(context, x, y, color, size, alpha) {
+  const px = x * size + 1, py = y * size + 1, s = size - 2;
+  const r = size * 0.22;
+  context.save();
+  context.globalAlpha = alpha;
+  context.fillStyle = color;
+  roundRectPath(context, px, py, s, s, r);
+  context.fill();
+  context.fillStyle = 'rgba(255,255,255,0.35)';
+  roundRectPath(context, px + 2, py + 2, Math.max(0, s - 4), Math.max(0, s * 0.35), r * 0.8);
+  context.fill();
+  context.restore();
+}
+
+// Pixel art — textura de mini-cuadros tipo dithering sobre el color base.
+function drawBlockPixel(context, x, y, color, size, alpha) {
+  const px = x * size + 1, py = y * size + 1, s = size - 2;
+  context.save();
+  context.globalAlpha = alpha;
+  context.fillStyle = color;
+  context.fillRect(px, py, s, s);
+  const cell = Math.max(2, Math.floor(s / 6));
+  context.fillStyle = 'rgba(0,0,0,0.15)';
+  for (let ry = 0; ry < s; ry += cell * 2) {
+    for (let rx = 0; rx < s; rx += cell * 2) {
+      context.fillRect(px + rx, py + ry, cell, cell);
+      context.fillRect(px + rx + cell, py + ry + cell, cell, cell);
+    }
+  }
+  context.strokeStyle = 'rgba(0,0,0,0.4)';
+  context.lineWidth = 1;
+  context.strokeRect(px + 0.5, py + 0.5, Math.max(0, s - 1), Math.max(0, s - 1));
+  context.restore();
+}
+
+function roundRectPath(context, x, y, w, h, r) {
+  const rad = Math.max(0, Math.min(r, w / 2, h / 2));
+  context.beginPath();
+  context.moveTo(x + rad, y);
+  context.arcTo(x + w, y, x + w, y + h, rad);
+  context.arcTo(x + w, y + h, x, y + h, rad);
+  context.arcTo(x, y + h, x, y, rad);
+  context.arcTo(x, y, x + w, y, rad);
+  context.closePath();
 }
 
 // Perfora un círculo transparente en (cx, cy) — deja ver el fondo CSS, sirve en ambos temas.
@@ -284,7 +432,7 @@ function punchNutHole(context, cx, cy, size) {
 
 function strokeNutHole(context, cx, cy, size, alpha) {
   context.globalAlpha = alpha;
-  context.strokeStyle = COLORS[NUT];
+  context.strokeStyle = currentPalette()[NUT];
   context.lineWidth = 2;
   context.beginPath();
   context.arc((cx + 0.5) * size, (cy + 0.5) * size, size * 0.6, 0, Math.PI * 2);
@@ -335,14 +483,14 @@ function drawBlast() {
     const size = BLOCK * (1 - p * 0.6);
     const offset = (BLOCK - size) / 2;
     ctx.globalAlpha = 1 - p;
-    ctx.fillStyle = COLORS[cell.type];
+    ctx.fillStyle = currentPalette()[cell.type];
     ctx.fillRect(cell.c * BLOCK + offset, cell.r * BLOCK + offset, size, size);
     ctx.globalAlpha = 1;
   }
 
   const px = (blast.cx + 0.5) * BLOCK, py = (blast.cy + 0.5) * BLOCK;
   ctx.globalAlpha = 1 - p;
-  ctx.strokeStyle = COLORS[BOMB];
+  ctx.strokeStyle = currentPalette()[BOMB];
   ctx.lineWidth = 3 * (1 - p);
   ctx.beginPath();
   ctx.arc(px, py, BLOCK * (0.4 + p * 2.2), 0, Math.PI * 2);
@@ -539,6 +687,8 @@ document.addEventListener('keydown', e => {
 
 restartBtn.addEventListener('click', init);
 themeToggleBtn.addEventListener('click', toggleTheme);
+if (skinSelect) skinSelect.addEventListener('change', e => applySkin(e.target.value));
 
 applyTheme(localStorage.getItem(THEME_KEY) || 'dark');
+applySkin(localStorage.getItem(SKIN_KEY) || 'retro');
 init();
